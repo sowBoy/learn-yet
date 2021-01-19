@@ -1,0 +1,175 @@
+version: '3.1'                                
+
+services:
+        #thread:
+        #container_name: sowboy_thread
+        #build: thread-tools
+        #ports:
+        #- 9002:9000
+        #links:
+        #- db
+        #volumes:
+        #- ./symfony/drops-engine:/data
+  redis-one:
+    image: 'bitnami/redis:latest'
+    ports:
+      - 6379:6379
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+  
+  redis-two:
+    image: 'bitnami/redis:latest'
+    ports:
+      - 6380:6379
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+
+  varnish:
+    container_name: sowboy_varnish
+    build: varnish-tools
+    ports:
+      - "82:80"
+    links:
+      - apache
+    volumes:
+      - ./varnish-tools/default.vcl:/etc/varnish/default.vcl
+    restart: unless-stopped
+
+  app:
+    container_name: sowboy_apps
+    build: php-tools
+    ports: 
+      - 9001:9000
+    links:
+      - db
+      - wpdb
+      - redis-one
+      - redis-two
+      - elasticsearch
+    privileged: true
+    volumes:
+      - ./symfony:/var/www
+      - "./conf/whatever.ini:/usr/local/etc/php/conf.d/whatever.ini"
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+  
+  wpdb:
+    container_name: sowboy_mydb
+    image: mysql:5.7
+    volumes:
+      - ./wpdbdata:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: passroot
+  
+  apache:
+    container_name: sowboy_apache
+    build: apache-tools
+    volumes:
+      - ./symfony:/var/www/html
+      - ./apache-tools/vhosts/sylius.conf:/etc/apache2/sites-available/sylius.conf:ro
+      - ./apache-tools/vhosts/sylius.conf:/etc/apache2/sites-enabled/sylius.conf:ro
+      - ./apache-tools/logs:/var/log/apache2
+
+    links:
+      - db
+      - phpfpm
+      - wpdb
+      - redis-one
+      - redis-two
+      - elasticsearch
+      
+    ports:
+      - "81:80"
+    privileged: true
+    environment:
+      FPM_HOST: phpfpm:9000
+  phpfpm:
+    container_name: sowboy_phpfpm
+    build: fpm-tools
+    volumes:
+      - ./symfony:/var/www/html
+
+  db:
+    container_name: sowboy_db
+    image: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      PGDATA: /data/postgres
+    volumes:
+       - ./postgres:/data/postgres
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+ 
+  adminer:
+    container_name: sowboy_admina
+    image: adminer
+    restart: always
+    ports:
+      - 8081:8080
+    links:
+      - db
+      - wpdb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      MYSQL_ROOT_PASSWORD: passroot
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:6.8.8
+    container_name: sowboy_elasticsearch
+    environment:
+      - xpack.security.enabled=false
+      - discovery.type=single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+      - 9300:9300
+
+  kibana:
+    container_name: kibana
+    image: docker.elastic.co/kibana/kibana:7.4.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - 5601:5601
+    depends_on:
+      - elasticsearch
+
+  mailhog:
+    container_name: mailhog
+    image: mailhog/mailhog
+    ports: 
+      - 1025:1025 # smtp server
+      - 8025:8025 # web ui
+  
+  rabbitmq:
+    image: rabbitmq:3.8-management-alpine
+    container_name: rabbitmq
+    volumes:
+      - ./rabbitmq/data/:/var/lib/rabbitmq/
+      - ./rabbitmq/logs/:/var/log/rabbitmq/
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbuser
+      RABBITMQ_DEFAULT_PASS: rabbpass
+    ports:
+      - 5672:5672
+      - 15672:15672 
+ 
+volumes:
+  elasticsearch-data:
+    driver: local
+

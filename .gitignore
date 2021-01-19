@@ -1,0 +1,7 @@
+/symfony
+/apache-tools/logs
+/postgres
+/pgadmin4
+/rabbitmq
+rabbitmq-ha
+
